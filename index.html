@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logística Nivel DIOS</title>
+
+<style>
+body { font-family: Arial; background:#eef2f7; padding:15px; }
+h2 { margin-top:20px; }
+
+input, select, button {
+  width:100%;
+  margin:5px 0;
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #ccc;
+  box-sizing: border-box;
+}
+
+button { background:#0066ff; color:white; border:none; cursor:pointer; }
+
+.card {
+  background:white;
+  padding:12px;
+  margin:10px 0;
+  border-radius:12px;
+  box-shadow:0 2px 6px rgba(0,0,0,0.1);
+}
+
+.badge {
+  display:inline-block;
+  padding:4px 8px;
+  border-radius:6px;
+  font-size:12px;
+  margin:6px 0;
+}
+
+.pendiente { background:orange; color:black; }
+.asignado { background:blue; color:white; }
+.incidencia { background:red; color:white; }
+</style>
+</head>
+
+<body>
+
+<h2>🚛 Logística Nivel DIOS</h2>
+
+<h3>Nuevo pedido</h3>
+<input id="cliente" placeholder="Cliente">
+<input id="direccion" placeholder="Dirección">
+<input id="material" placeholder="Material">
+<input id="peso" placeholder="Toneladas" type="number" step="0.1">
+<input id="lat" placeholder="Latitud" type="number" step="any">
+<input id="lng" placeholder="Longitud" type="number" step="any">
+
+<select id="tipo">
+<option value="grua">Grúa</option>
+<option value="volquete">Volquete</option>
+<option value="plataforma">Plataforma</option>
+</select>
+
+<select id="prioridad">
+<option value="3">Alta</option>
+<option value="2">Media</option>
+<option value="1">Baja</option>
+</select>
+
+<button onclick="crearPedido()">Crear pedido</button>
+
+<h3>Pedidos</h3>
+<div id="pedidosDiv"></div>
+
+<h3>Rutas</h3>
+<div id="rutasDiv"></div>
+
+<script>
+let pedidos = JSON.parse(localStorage.getItem("pedidos")) || [];
+
+let camiones = [
+  { id: 1, tipo: "grua", cap: 8 },
+  { id: 2, tipo: "volquete", cap: 15 },
+  { id: 3, tipo: "plataforma", cap: 20 }
+];
+
+function guardar() {
+  localStorage.setItem("pedidos", JSON.stringify(pedidos));
+}
+
+function crearPedido() {
+  if (!cliente.value || !direccion.value) return;
+
+  let p = {
+    id: Date.now(),
+    cliente: cliente.value,
+    direccion: direccion.value,
+    material: material.value,
+    peso: parseFloat(peso.value) || 0,
+    lat: parseFloat(lat.value) || 0,
+    lng: parseFloat(lng.value) || 0,
+    tipo: tipo.value,
+    prioridad: parseInt(prioridad.value),
+    estado: "pendiente",
+    camion: null
+  };
+
+  pedidos.push(p);
+  autoAsignar();
+  guardar();
+  render();
+
+  cliente.value = "";
+  direccion.value = "";
+  material.value = "";
+  peso.value = "";
+  lat.value = "";
+  lng.value = "";
+  tipo.value = "grua";
+  prioridad.value = "3";
+}
+
+function autoAsignar() {
+  pedidos.forEach(p => {
+    if (!p.camion) {
+      let c = camiones.find(c => c.tipo === p.tipo && c.cap >= p.peso);
+      if (c) {
+        p.camion = c.id;
+        p.estado = "asignado";
+      }
+    }
+  });
+}
+
+function distancia(a, b) {
+  return Math.sqrt((a.lat - b.lat) ** 2 + (a.lng - b.lng) ** 2);
+}
+
+function calcularRutas() {
+  let rutas = [];
+
+  camiones.forEach(camion => {
+    let lista = pedidos.filter(p => p.camion === camion.id && p.estado !== "incidencia");
+    let ruta = [];
+
+    while (lista.length) {
+      lista.sort((a, b) => {
+        return (b.prioridad - a.prioridad) || distancia(lista[0], a) - distancia(lista[0], b);
+      });
+      ruta.push(lista.shift());
+    }
+
+    rutas.push({ camion, ruta });
+  });
+
+  return rutas;
+}
+
+function incidencia(id) {
+  let p = pedidos.find(x => x.id === id);
+  if (!p) return;
+  p.estado = "incidencia";
+  guardar();
+  render();
+}
+
+function abrirMapaRuta(camionId) {
+  let rutas = calcularRutas();
+  let encontrada = rutas.find(r => r.camion.id === camionId);
+
+  if (!encontrada || encontrada.ruta.length < 1) {
+    alert("No hay pedidos en esta ruta");
+    return;
+  }
+
+  let ruta = encontrada.ruta;
+
+  if (ruta.length === 1) {
+    let destino = ruta[0];
+    let url = `https://www.google.com/maps/search/?api=1&query=${destino.lat},${destino.lng}`;
+    window.open(url, "_blank");
+    return;
+  }
+
+  let origen = ruta[0];
+  let destino = ruta[ruta.length - 1];
+
+  let waypoints = ruta
+    .slice(1, -1)
+    .map(p => `${p.lat},${p.lng}`)
+    .join("|");
+
+  let url = `https://www.google.com/maps/dir/?api=1&origin=${origen.lat},${origen.lng}&destination=${destino.lat},${destino.lng}&waypoints=${waypoints}`;
+
+  window.open(url, "_blank");
+}
+
+function render() {
+  pedidosDiv.innerHTML = pedidos.map(p => `
+    <div class="card">
+      <b>${p.cliente}</b><br>
+      ${p.material || ""} (${p.peso}t)<br>
+      ${p.direccion}<br>
+      <span class="badge ${p.estado}">${p.estado}</span><br>
+      Camión: ${p.camion || "No asignado"}<br>
+      <button onclick="incidencia(${p.id})">Incidencia</button>
+    </div>
+  `).join("");
+
+  let rutas = calcularRutas();
+
+  rutasDiv.innerHTML = rutas.map(r => `
+    <div class="card">
+      <b>Camión ${r.camion.id}</b><br>
+      ${r.ruta.length ? r.ruta.map((p, i) => `${i + 1}. ${p.cliente}`).join("<br>") : "Sin pedidos"}
+      <button onclick="abrirMapaRuta(${r.camion.id})">Abrir ruta</button>
+    </div>
+  `).join("");
+}
+
+render();
+</script>
+
+</body>
+</html>
